@@ -1,8 +1,23 @@
 # Soft-Objectness Loss
 
 ## How to use loss_custom in YOLOv5 official code.
-1. Used loss_custom.py instead of loss.py
-2. Add hyperparameter "n" to hyp.scratch.yaml
+1. Add loss_custom.py to the folder (same directory with loss.py)
+2. Change import from loss to loss_custom in main.py
+  ```
+  from utils.loss import ComputeLoss
+  ```
+  ```
+  from utils.loss_custom import ComputeLoss
+  ```
+3. Add hyperparameter "n" to hyp.scratch.yaml
+  ```
+  n: 10 # 50, # 20
+  ```
+- Detail implementation of our method is in loss_custom.py > Compute_Loss > build_targets_custom1
+- build_targets_custom: implemented with for loops => very long computation time 
+- build_targets_custom: modified computation into tensor => much faster but still slower than the original wich has less targets (Binary)
+
+
 
 ## Soft-Objectness Score
 <img src="https://latex.codecogs.com/svg.latex?d_i%20%3D%20%5Csqrt%7B%28%5Cfrac%7Bcx%20-%20cx_i%7D%7B%20w%20/%202%7D%29%5E2%20&plus;%20%28%5Cfrac%7Bcy%20-%20cy_i%7D%7B%20h%20/%202%7D%29%5E2%7D" />
