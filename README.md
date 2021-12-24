@@ -24,7 +24,10 @@
 
 ## Experiments
 ### Experiment1: COCO128
+Results: https://wandb.ai/wonseokjeong/YOLOv5?workspace=user-wonseokjeong
 
 ### Experiment2: COCO
+Results: https://wandb.ai/wonseokjeong/train?workspace=user-wonseokjeong
 
 ### Experiment3: Pascal VOC
+Results: https://wandb.ai/wonseokjeong/VOC/workspace?workspace=user-wonseokjeong
