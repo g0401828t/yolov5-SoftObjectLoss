@@ -1,7 +1,7 @@
 # Soft-Objectness Loss
 
 ## How to use loss_custom in YOLOv5 official code.
-1. Add loss_custom.py to the folder (same directory with loss.py)
+1. Add loss_custom.py to the folder (same directory with loss.py) and edit train.py
 2. Change import from loss to loss_custom in main.py
   ```
   from utils.loss import ComputeLoss
@@ -9,13 +9,15 @@
   ```
   from utils.loss_custom import ComputeLoss
   ```
-3. Add hyperparameter "n" to hyp.scratch.yaml
+3. play with hyperparameter "n", "gamma", "sigma" with parser
   ```
-  n: 10 # 50, # 20
+  n: softscore1 assignment
+  gamma : softscore1 assignment
+  sigma : softscore2 assignment
   ```
 - Detail implementation of our method is in loss_custom.py > Compute_Loss > build_targets_custom1
 - build_targets_custom: implemented with for loops => very long computation time 
-- build_targets_custom: modified computation into tensor => much faster but still slower than the original wich has less targets (Binary)
+- build_targets_custom1: modified computation into tensor => much faster but still slower than the original wich has less targets (Binary)
 
 
 
@@ -33,7 +35,8 @@
 ## Soft-Objectness Loss
 
 ### OursLoss1
-<img src = "https://latex.codecogs.com/svg.latex?soft%5C%20object%20%5C%20loss1%20%3D%20-%281-s_i%29%5Clog%281-t_i%29"/>
+<img src = "https://latex.codecogs.com/png.latex?soft%5C%20object%5C%20loss1%20%3D%20-%281-s_i%29%5E%5Cgamma%5Clog%281-t_i%29"/>
+- graph image for gamma = 1
 <img width="500" src="https://user-images.githubusercontent.com/55650445/147318712-f488160d-8bdb-49c7-88c0-59e115e2666f.png"/>
 
 ### OursLoss2
