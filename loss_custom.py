@@ -92,7 +92,7 @@ class QFocalLoss(nn.Module):
 
 class ComputeLoss:
     # Compute losses
-    def __init__(self, model, autobalance=False):
+    def __init__(self, model, loss_type, n, gamma=1, sigma=1, autobalance=False):
         self.sort_obj_iou = False
         device = next(model.parameters()).device  # get model device
         h = model.hyp  # hyperparameters
@@ -118,7 +118,12 @@ class ComputeLoss:
         for k in 'na', 'nc', 'nl', 'anchors':
             setattr(self, k, getattr(det, k))
 
-    def __call__(self, p, targets):  # predictions, targets, model
+        self.loss_type = loss_type
+        self.n = n
+        self.gamma = gamma
+        self.sigma = sigma
+
+    def __call__(self, p, targets, epoch):  # predictions, targets, model
         # ==== shapes === #
         # p : list of len 3 scales
         # p[0].shape =  [N, 3, 80, 80, 85]
@@ -137,7 +142,7 @@ class ComputeLoss:
         """     custom building targets     """
         # tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
         # tcls, tbox, indices, anchors, soft_indices = self.build_targets_custom(p, targets)  # targets
-        tcls, tbox, indices, anchors, soft_indices = self.build_targets_custom1(p, targets)  # targets
+        tcls, tbox, indices, anchors, soft_indices = self.build_targets_custom1(p, targets, epoch)  # targets
         """================================="""
 
         # pure_ious = torch.zeros(1, device=device)
@@ -208,12 +213,21 @@ class ComputeLoss:
             hard_obji = self.BCEobj(pi[..., 4][hard_mask], tobj[hard_mask])
 
             # Soft_Object_Loss_1
-            # soft_obji = self.soft_obj_loss1(pi[..., 4][soft_mask], tobj[soft_mask])
+            if self.loss_type == "loss1":
+                soft_obji = self.soft_obj_loss1(pi[..., 4][soft_mask], tobj[soft_mask])
+            if self.loss_type == "loss11":
+                soft_obji = self.soft_obj_loss11(pi[..., 4][soft_mask], tobj[soft_mask], self.gamma)
+            if self.loss_type == "loss2":
+                # soft_obji = self.soft_obj_loss2(pi[..., 4][soft_mask], tobj[soft_mask]) - self.soft_obj_loss2(tobj[soft_mask], tobj[soft_mask])       # both pos, neg => close to score
+                # soft_obji = self.BCEobj(pi[..., 4][soft_mask], tobj[soft_mask]) - self.BCEobj(tobj[soft_mask], tobj[soft_mask])                       # both pos, neg => close to score
+                soft_obji = self.soft_obj_loss22(pi[..., 4][soft_mask], tobj[soft_mask])
+
+            # # Soft_Object_Loss_1
             # soft_obji = self.NegBCEobj(pi[..., 4][soft_mask], tobj[soft_mask])
             # # Soft_Object_Loss_2
             # soft_obji = self.soft_obj_loss2(pi[..., 4][soft_mask], tobj[soft_mask]) - self.soft_obj_loss2(tobj[soft_mask], tobj[soft_mask])       # both pos, neg => close to score
             # soft_obji = self.BCEobj(pi[..., 4][soft_mask], tobj[soft_mask]) - self.BCEobj(tobj[soft_mask], tobj[soft_mask])                       # both pos, neg => close to score
-            soft_obji = self.soft_obj_loss22(pi[..., 4][soft_mask], tobj[soft_mask])
+            # soft_obji = self.soft_obj_loss22(pi[..., 4][soft_mask], tobj[soft_mask])
             # # Soft_Object Loss 3
             # soft_obji = self.soft_obj_loss3(pi[..., 4][soft_mask], tobj[soft_mask])
 
@@ -241,6 +255,11 @@ class ComputeLoss:
     def soft_obj_loss1(self, p, t):
         p = self.sigmoid(p)
         neg_bce = -(1-t) * torch.log(1-p + 1e-6)
+        return neg_bce.mean()
+
+    def soft_obj_loss11(self, p, t, gamma):
+        p = self.sigmoid(p)
+        neg_bce = -((1-t) ** gamma) * torch.log(1-p + 1e-6)
         return neg_bce.mean()
         
     # def soft_obj_loss2(self, p, t):
@@ -518,7 +537,7 @@ class ComputeLoss:
         return tcls, tbox, indices, anch, soft_indices
 
 
-    def build_targets_custom1(self, p, targets):
+    def build_targets_custom1(self, p, targets, epoch):
         # ====== What's Happening ======= #
         # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
         # targets.shape : (N, 6) 6 -> (image, class, x, y, w, h)
@@ -592,49 +611,52 @@ class ComputeLoss:
             gij = (gxy).long()                      # grid cell index
             gi, gj = gij.T                          # grid x,y indices
             a = t[:, 6].long()                      # anchor indices
+            # 나중에 gxy - gji 를 통해 cell 내에서의 좌표를 넘겨준다.
             
             
 
 
 
-
-            gi1j1, gi2j2 = (gxy - gwh/2).long(), (gxy + gwh/2).long()           # top_let cell, bottom_rigth cell index
-            gi1, gj1  = gi1j1.T                                                 # top_let cell index
+            "find the number of cells in each bouding boxes"
+            gi1j1, gi2j2 = (gxy - gwh/2).long(), (gxy + gwh/2).long()           # top_left cell, bottom_rigtht cell index
+            gi1, gj1  = gi1j1.T                                                 # top_left cell index
             width, height = (gi2j2 + 1 - gi1j1).T                               # width, height of num_of_cells in bbox
             num_of_cells = width * height                                       # number of cells in bbox
-            # pdb.set_trace()
+            # <========================= 2. 작은 박스로 overlap 되게
+            sorted_idx_numcells = torch.argsort(num_of_cells, descending=True)  
+            # <========================= 
 
+            "make a tensor containing all cells that are in each bounding box"
+            "by repeating center cell with number of cells in in each bouding box"
+            "soft_t[6:] : bbox starting cell on the top-left corner"
             gw, gh = gwh.T
             soft_t = torch.cat((b.unsqueeze(-1), a.unsqueeze(-1), gj.unsqueeze(-1), gi.unsqueeze(-1), height.unsqueeze(-1), width.unsqueeze(-1), gj1.unsqueeze(-1), gi1.unsqueeze(-1)), dim=1)         # gj1, gi1 : top left cell index
-            # pdb.set_trace()
+            # <====== 2nd trial
+            soft_t = soft_t[sorted_idx_numcells]                                           
+            num_of_cells = num_of_cells[sorted_idx_numcells]                               
+            width, height = width[sorted_idx_numcells], height[sorted_idx_numcells]         
+            # <======================== 2
             soft_t = torch.repeat_interleave(soft_t, num_of_cells, dim=0)                                               # repeat every bbox with the number of cells in each bbox
             # pdb.set_trace()
             
+            "reassign correct indices for each cell"
             start_idx = 0
-            for i, xy in enumerate(gxy):
-                # print("num_of cells:", num_of_cells[i])
+            cell_offset = torch.tensor([], device = targets.device)
+            for i in range(len(num_of_cells)):          # enumerate보다 이게 빠를려나 싶어서
                 end_idx = num_of_cells[i] + start_idx
-                # print("start, end cell index:", start_idx, end_idx)
-                # pdb.set_trace()
                 w, h = width[i], height[i]
-                # pdb.set_trace()
                 soft_gi, soft_gj = torch.arange(w).to('cuda').repeat_interleave(h), torch.arange(h).to('cuda').repeat(w)
-                # pdb.set_trace()
-                soft_ji = torch.cat((soft_gj.unsqueeze(-1), soft_gi.unsqueeze(-1)), dim=1)
-                # pdb.set_trace()
-                
-                soft_t[start_idx:end_idx, 6:] += soft_ji                                                                # add indexes for each cell in each bbox
-                # print(soft_ji)
-                # print(soft_t[:20, 2:])
-                
-                start_idx += num_of_cells[i]
-                # pdb.set_trace()
+                soft_ji = torch.cat((soft_gj.unsqueeze(-1), soft_gi.unsqueeze(-1)), dim=1)          # indices for each cell in a bbox
+                cell_offset = torch.cat((cell_offset, soft_ji), dim=0)
+                # soft_t[start_idx:end_idx, 6:] += soft_ji 
+                start_idx = end_idx
+            soft_t[..., 6:] += cell_offset.long()
 
-            # pdb.set_trace()
             
             """
             Assigning Normalized Distance and Score Assignment
             soft_t = [b, a, gj, gi, height, width, gj1, gi1]
+            index:     0, 1, 2,  3,    4  ,   5  ,  6  , 7
             """
             S = gain[3]
             center_of_cells = soft_t[..., 6:] + 0.5
@@ -644,7 +666,16 @@ class ComputeLoss:
             # score = (normalized_distance - 1) ** 10         # Best
             # score = (normalized_distance - 1) ** 4
             # score = (normalized_distance - 1) ** 20
-            score = (normalized_distance - 1) ** self.hyp["n"]
+            # score = (normalized_distance - 1) ** self.hyp["n"]
+            # score = (normalized_distance - 1) ** (10 + 10 * (epoch//200))
+            # score = (normalized_distance - 1) ** (10 + 10 * (epoch//100))
+
+            """ score assignment """
+            # score = (normalized_distance - 1) ** self.n                                   # score1
+            score = (torch.exp(-( normalized_distance ** 2 / (2*( self.sigma**2)))))        # score2
+            # print("sigma:",self.sigma)
+            # print("score:",score)
+            # pdb.set_trace()
 
 
             # pdb.set_trace()
@@ -669,17 +700,34 @@ class ComputeLoss:
             
 
             """     append soft mask and score      """
-            score = score.type(torch.double)
-            sorted_idx = torch.argsort(score, dim=0)
-            # pdb.set_trace()
-
-            score = score[sorted_idx]
-            soft_t = soft_t[sorted_idx]
-            # pdb.set_trace()
+            # score = score.type(torch.double)                      
+            # sorted_idx = torch.argsort(score, dim=0)                                #<=====         1st trial 기존의 큰값의 score로 overlap
+            # sorted_idx = torch.argsort(score, dim=0, descending=True)              #<=====         2nd-1) trial 작은값의 score로 overlap 이렇게 하면 안됨!!!!!
+            # score = score[sorted_idx]
+            # soft_t = soft_t[sorted_idx]
+            # pdb.set_trace() 
 
             b_soft, a_soft = soft_t[..., :2].T
-            gj_soft, gi_soft = soft_t[..., 6:].T
-            soft_indices.append((b_soft, a_soft, gj_soft.clamp_(0, gain[3] - 1), gi_soft.clamp_(0, gain[2] - 1), score.view(1, -1)))
+            gj_soft, gi_soft = soft_t[..., 6:].T                 #<=====
+            
+            # # 3rd Trial
+            # # 아래 처럼 변경: 겹치는 부분은 평균값을 부여
+            # soft_gjgi, idx = torch.unique(soft_t[:, 6:], dim=0, return_inverse=True)
+            # gj_soft, gi_soft = soft_gjgi.T
+            # ba_soft = torch.zeros((len(soft_gjgi), 2), device = targets.device)
+            # score_soft = torch.zeros(len(soft_gjgi), device = targets.device)
+            # repeat = torch.zeros(len(soft_gjgi), device = targets.device)
+            # for i, idxx in enumerate(idx):
+            #     score_soft[idxx:idxx+1] += score[i]
+            #     repeat[idxx:idxx+1] += 1
+            #     ba_soft[idxx:idxx+1] = soft_t[i, 0:2]
+            # b_soft, a_soft = ba_soft.T
+            # score = score_soft / repeat
+
+
+
+
+            soft_indices.append((b_soft.long(), a_soft.long(), gj_soft.long().clamp_(0, gain[3] - 1), gi_soft.long().clamp_(0, gain[2] - 1), score.view(1, -1).double()))
             # pdb.set_trace()
             """====================================="""
 
