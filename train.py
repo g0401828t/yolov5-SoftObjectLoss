@@ -503,9 +503,9 @@ def parse_opt(known=False):
     # custom loss
     parser.add_argument('--custom', default='plain', help='whether you want custom loss or not')
     parser.add_argument('--loss', default='loss1', help='type of soft objectness loss')
-    parser.add_argument('--n', default=10, type=int, help='hyperparameter n')
-    parser.add_argument('--gamma', default=1, type=float, help='hyperparameter gamma')
-    parser.add_argument('--sigma', default=1, type=float, help='hyperparameter sigma')
+    parser.add_argument('--n', default=10, type=int, help='hyperparameter n, softscore1 assignment')
+    parser.add_argument('--gamma', default=1, type=float, help='hyperparameter gamma, softscore1 assignment')
+    parser.add_argument('--sigma', default=1, type=float, help='hyperparameter sigma, softscore2 assignment')
 
     opt = parser.parse_known_args()[0] if known else parser.parse_args()
     return opt
